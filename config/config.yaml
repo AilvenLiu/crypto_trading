@@ -1,0 +1,67 @@
+environment: "simulation"  # or "real"
+
+data_processing:
+  api_key: "8d5f45b0-c7d8-4290-9415-4fbb28d38da1"
+  api_secret: "3CB219EFCF31CA561D669C2CCB72D675"
+  passphrase: "paper_api"  
+  base_url: "https://www.okx.com"  # Change based on environment
+  ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+  symbol: "BTC-USDT-SWAP"
+  db_path: "data.db"
+
+backtesting:
+  start_date: "2024-01-01 00:00:00"
+  end_date: "2024-10-27 23:59:59"
+  strategies:
+    ma_strategy:
+      strategy: "ma_strategy"
+      slippage: 0.001
+      fee: 0.00075
+    macd_strategy:
+      strategy: "macd_strategy"
+      slippage: 0.001
+      fee: 0.00075
+    rsi_strategy:
+      strategy: "rsi_strategy"
+      slippage: 0.001
+      fee: 0.00075
+
+model_training:
+  model_path: "models/trade_model.pth"
+  input_dim: 6  # 已更新为适应复合策略的输入维度
+  hidden_dim: 50
+  output_dim: 2
+  learning_rate: 0.001
+  epochs: 100
+  batch_size: 32
+
+trading_execution:
+  api_key: "8d5f45b0-c7d8-4290-9415-4fbb28d38da1"
+  api_secret: "3CB219EFCF31CA561D669C2CCB72D675"
+  passphrase: "paper_api"  
+  base_url: "https://www.okx.com"  # Change based on environment
+  symbol: "BTC-USDT-SWAP"
+  initial_leverage: 5
+  risk_management:
+    min_leverage: 1
+    max_leverage: 50
+    max_position: 100
+    daily_loss_limit: 0.05  # 5%
+
+monitoring:
+  log_path: "logs/"
+  email:
+    smtp_server: "smtp.trading_system.com"
+    smtp_port: 587
+    username: "user@trading_system.com"
+    password: "password"
+    recipients:
+      - "admin@trading_system.com"
+  telegram:
+    token: "66666666666666666666666666666666"
+    chat_id: "66666666666666666666666666666666"
+  performance:
+    cpu_threshold: 80
+    memory_threshold: 80
+    db_write_threshold: 50  # Minimum writes per minute
+    volatility_threshold: 0.05  # 5% volatility

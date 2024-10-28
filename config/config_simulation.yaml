@@ -1,0 +1,10 @@
+environment: "simulation"
+
+data_processing:
+  api_key: "YOUR_SIMULATION_OKX_API_KEY"
+  api_secret: "YOUR_SIMULATION_OKX_API_SECRET"
+  passphrase: "YOUR_SIMULATION_OKX_PASSPHRASE"
+  base_url: "https://www.okx.com"
+  ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+  symbol: "BTC-USDT-SWAP"
+  db_path: "data_simulation.db"
