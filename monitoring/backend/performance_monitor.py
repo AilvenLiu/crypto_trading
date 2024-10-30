@@ -14,6 +14,7 @@ class PerformanceMonitor:
         self.volatility_threshold = config['monitoring']['performance']['volatility_threshold']
         self.alert_manager = AlertManager(config_path=config_path)
         self.socketio = socketio
+        self.current_metrics = {}
 
         # Setup logging
         self.logger = logging.getLogger('PerformanceMonitor')
@@ -53,34 +54,47 @@ class PerformanceMonitor:
 
     def monitor_performance(self):
         while True:
-            metrics = self.get_metrics()
-            self.logger.info(f"Metrics: {metrics}")
-            if metrics['cpu_usage'] > self.cpu_threshold:
+            self.current_metrics = {
+                'cpu_usage': psutil.cpu_percent(interval=1),
+                'memory_usage': psutil.virtual_memory().percent,
+                'disk_usage': psutil.disk_usage('/').percent,
+                'db_write_per_minute': self.get_db_write_rate(),
+                'volatility': self.calculate_market_volatility()
+            }
+
+            if self.socketio:
+                self.socketio.emit('metrics_update', self.current_metrics)
+
+            self.logger.info(f"Metrics: {self.current_metrics}")
+            if self.current_metrics['cpu_usage'] > self.cpu_threshold:
                 subject = 'High CPU Usage Alert'
-                body = f"CPU usage is at {metrics['cpu_usage']}%, exceeding the threshold of {self.cpu_threshold}%."
+                body = f"CPU usage is at {self.current_metrics['cpu_usage']}%, exceeding the threshold of {self.cpu_threshold}%."
                 self.alert_manager.alert(subject, body, method='email')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
-            if metrics['memory_usage'] > self.memory_threshold:
+            if self.current_metrics['memory_usage'] > self.memory_threshold:
                 subject = 'High Memory Usage Alert'
-                body = f"Memory usage is at {metrics['memory_usage']}%, exceeding the threshold of {self.memory_threshold}%."
+                body = f"Memory usage is at {self.current_metrics['memory_usage']}%, exceeding the threshold of {self.memory_threshold}%."
                 self.alert_manager.alert(subject, body, method='telegram')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
-            if metrics['db_write_per_minute'] < self.db_write_threshold:
+            if self.current_metrics['db_write_per_minute'] < self.db_write_threshold:
                 subject = 'Low Database Write Rate Alert'
-                body = f"Database write rate is at {metrics['db_write_per_minute']} writes per minute, below the threshold of {self.db_write_threshold}."
+                body = f"Database write rate is at {self.current_metrics['db_write_per_minute']} writes per minute, below the threshold of {self.db_write_threshold}."
                 self.alert_manager.alert(subject, body, method='email')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
-            if metrics['volatility'] > self.volatility_threshold:
+            if self.current_metrics['volatility'] > self.volatility_threshold:
                 subject = 'High Market Volatility Alert'
-                body = f"Market volatility is at {metrics['volatility']:.2%}, exceeding the threshold of {self.volatility_threshold:.2%}."
+                body = f"Market volatility is at {self.current_metrics['volatility']:.2%}, exceeding the threshold of {self.volatility_threshold:.2%}."
                 self.alert_manager.alert(subject, body, method='telegram')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
             time.sleep(60)  # Monitor every minute
+
+    def get_current_metrics(self):
+        return self.current_metrics

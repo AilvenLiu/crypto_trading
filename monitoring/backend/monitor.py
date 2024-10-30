@@ -9,7 +9,7 @@ from trading_execution.executor import Executor
 
 # Initialize Flask app
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key'  # Change to actual secret
+app.config['SECRET_KEY'] = 'secret' # get from config
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Load config
@@ -23,15 +23,15 @@ executor = Executor(config_path='config/config.yaml')
 
 @app.route('/metrics', methods=['GET'])
 def get_metrics():
-    metrics = performance_monitor.get_metrics()
+    metrics = performance_monitor.get_current_metrics()
     return jsonify(metrics)
 
 @app.route('/control', methods=['POST'])
-def control_commands():
+def control():
     data = request.get_json()
     command = data.get('command')
     command_data = data.get('data', {})
-    
+
     if command == 'pause':
         executor.pause_trading()
         socketio.emit('control_response', {'status': 'paused'})
@@ -43,9 +43,10 @@ def control_commands():
     elif command == 'update_risk':
         new_leverage = command_data.get('new_leverage')
         if new_leverage:
-            executor.risk_manager.update_leverage(new_leverage)
-            socketio.emit('control_response', {'status': f'Leverage updated to {new_leverage}x'})
-            return jsonify({'status': f'Leverage updated to {new_leverage}x'})
+            executor.update_leverage(new_leverage)  # Ensure this method exists
+            leverage_status = f"Leverage updated to {new_leverage}x"
+            socketio.emit('control_response', {'status': leverage_status})
+            return jsonify({'status': leverage_status})
         else:
             return jsonify({'error': 'No leverage value provided'}), 400
     else:

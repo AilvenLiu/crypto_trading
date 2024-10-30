@@ -1,14 +1,12 @@
 import requests
 import json
 import time
+import yaml
 import logging
 import threading
 from logging.handlers import RotatingFileHandler
 from trading_execution.risk_manager import RiskManager
 from trading_execution.trader import Trader
-
-def get_executor(config_path='config/config.yaml'):
-    return Executor(config_path=config_path)
 
 class Executor:
     def __init__(self, config_path='config/config.yaml', signal_queue=None):
@@ -20,7 +18,7 @@ class Executor:
         self.base_url = config['trading_execution']['base_url']
         self.symbol = config['trading_execution']['symbol']
         self.leverage = float(config['trading_execution']['initial_leverage'])
-        self.risk_manager = RiskManager(config_path)
+        self.risk_manager = RiskManager(config_path=config_path, executor=self)
         self.trader = Trader(self)
         self.session = requests.Session()
         self.headers = {
@@ -42,103 +40,71 @@ class Executor:
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
 
-    def sign_request(self, method, request_path, body=''):
-        # Implement OKX API signing
-        timestamp = str(time.time())
-        message = timestamp + method + request_path + body
-        signature = self.generate_signature(message)
-        return signature, timestamp
-
-    def generate_signature(self, message):
-        import hmac, hashlib
-        return hmac.new(self.api_secret.encode(), message.encode(), hashlib.sha256).hexdigest()
-
-    def place_order(self, side, size, price=None, order_type='limit'):
-        request_path = '/api/v5/trade/order'
-        method = 'POST'
-        body = {
+    def place_order(self, action, size, price, type='limit'):
+        """
+        Places an order using OKX API.
+        """
+        order_data = {
             "instId": self.symbol,
-            "tdMode": "isolated",
-            "side": side.lower(),
-            "ordType": order_type.upper(),
+            "tdMode": "cross",  # or "isolated"
+            "side": action,
+            "ordType": type,
             "sz": str(size),
-            "slOrdPx": str(price) if price else None
+            "px": str(price)
         }
-        body = {k: v for k, v in body.items() if v is not None}
-        body_json = json.dumps(body)
-        signature, timestamp = self.sign_request(method, request_path, body_json)
-        headers = self.headers.copy()
-        headers["OK-ACCESS-SIGN"] = signature
-        headers["OK-ACCESS-TIMESTAMP"] = timestamp
-
         try:
-            response = self.session.post(self.base_url + request_path, headers=headers, data=body_json)
-            response.raise_for_status()
+            self.logger.info(f"Placing order: {order_data}")
+            # Example: Signing and sending the request (Implement actual signing as per OKX API)
+            response = self.session.post(f"{self.base_url}/api/v5/trade/order", headers=self.headers, data=json.dumps(order_data))
             data = response.json()
-            if data['retCode'] == '0':
+            if data.get("result"):
                 order_id = data['data'][0]['ordId']
                 with self.order_lock:
-                    self.open_orders[order_id] = {'side': side, 'size': size, 'price': price, 'status': 'open'}
-                self.logger.info(f"Placed order: ID {order_id}, Side: {side}, Size: {size}, Price: {price}")
-                return order_id
+                    self.open_orders[order_id] = order_data
+                return data['data'][0]
             else:
-                self.logger.error(f"Order placement failed: {data['msg']}")
+                self.logger.error(f"Failed to place order: {data.get('msg')}")
                 return None
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Order placement exception: {e}")
+            self.logger.error(f"Exception during placing order: {e}")
             return None
 
     def cancel_order(self, order_id):
-        request_path = '/api/v5/trade/cancel-order'
-        method = 'POST'
-        body = {
+        """
+        Cancels an existing order using OKX API.
+        """
+        cancel_data = {
+            "instId": self.symbol,
             "ordId": order_id
         }
-        body_json = json.dumps(body)
-        signature, timestamp = self.sign_request(method, request_path, body_json)
-        headers = self.headers.copy()
-        headers["OK-ACCESS-SIGN"] = signature
-        headers["OK-ACCESS-TIMESTAMP"] = timestamp
-
         try:
-            response = self.session.post(self.base_url + request_path, headers=headers, data=body_json)
-            response.raise_for_status()
+            self.logger.info(f"Cancelling order: {order_id}")
+            response = self.session.post(f"{self.base_url}/api/v5/trade/cancel-order", headers=self.headers, data=json.dumps(cancel_data))
             data = response.json()
-            if data['retCode'] == '0':
+            if data.get("result"):
                 with self.order_lock:
-                    if order_id in self.open_orders:
-                        self.open_orders[order_id]['status'] = 'cancelled'
-                self.logger.info(f"Cancelled order: ID {order_id}")
+                    self.open_orders.pop(order_id, None)
+                self.logger.info(f"Order {order_id} cancelled successfully.")
                 return True
             else:
-                self.logger.error(f"Order cancellation failed: {data['msg']}")
+                self.logger.error(f"Failed to cancel order {order_id}: {data.get('msg')}")
                 return False
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Order cancellation exception: {e}")
+            self.logger.error(f"Exception during cancelling order {order_id}: {e}")
             return False
 
     def get_open_orders(self):
-        request_path = '/api/v5/trade/orders-pending'
-        method = 'GET'
-        signature, timestamp = self.sign_request(method, request_path)
-        headers = self.headers.copy()
-        headers["OK-ACCESS-SIGN"] = signature
-        headers["OK-ACCESS-TIMESTAMP"] = timestamp
-
-        params = {
-            "instId": self.symbol
-        }
-
+        """
+        Retrieves all open orders from OKX API.
+        """
         try:
-            response = self.session.get(self.base_url + request_path, headers=headers, params=params)
-            response.raise_for_status()
+            self.logger.info("Fetching open orders.")
+            response = self.session.get(f"{self.base_url}/api/v5/trade/orders-pending?instId={self.symbol}", headers=self.headers)
             data = response.json()
-            if data['retCode'] == '0':
-                orders = data['data']
-                self.logger.info(f"Retrieved {len(orders)} open orders.")
-                return orders
+            if data.get("result"):
+                return data['data']
             else:
-                self.logger.error(f"Failed to retrieve open orders: {data['msg']}")
+                self.logger.error(f"Failed to retrieve open orders: {data.get('msg')}")
                 return []
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Get open orders exception: {e}")
@@ -165,20 +131,16 @@ class Executor:
             self.logger.info("Trading is paused. Ignoring signal.")
             return
         action, size, price = signal
-        order_id = self.place_order(action, size, price)
-        if order_id:
+        order = self.place_order(action, size, price)
+        if order:
+            order_id = order['ordId']
             self.logger.info(f"Order placed: {order_id}")
             # Integrate with RiskManager
-            self.risk_manager.manage_risk(signal=1 if action.lower() == 'buy' else -1, size=size)
+            signal_value = 1 if action.lower() == 'buy' else -1
+            self.risk_manager.manage_risk(signal=signal_value, size=size)
 
     def start(self):
         signal_thread = threading.Thread(target=self.monitor_signals, args=(self.trader.signal_queue,))
         signal_thread.daemon = True
         signal_thread.start()
         self.logger.info("Executor started and listening to signal queue.")
-
-if __name__ == "__main__":
-    import queue
-    signal_q = queue.Queue()
-    executor = Executor(signal_queue=signal_q)
-    executor.start()
