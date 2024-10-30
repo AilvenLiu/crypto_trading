@@ -1,41 +1,36 @@
 import asyncio
-import websockets
 import json
 import sqlite3
+from threading import Thread, Lock, Event
 from datetime import datetime
-import yaml
-import pandas as pd
-import numpy as np
-from threading import Thread
 import time
+import yaml
+import logging
+import websockets
+from data_processing.data_storage import DataStorage
 
 class DataFetcher:
     def __init__(self, config_path='config/config.yaml'):
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         self.db_path = config['data_processing']['db_path']
-        self.symbol = config['data_processing']['symbol']
         self.ws_url = config['data_processing']['ws_url']
+        self.symbol = config['data_processing']['symbol']
         self.buffer = []
-        self.batch_size = 100  # 批量插入大小
-        self.flush_interval = 60  # 每60秒刷新缓存
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.cursor = self.conn.cursor()
-        self.create_tables()
+        self.batch_size = 100
+        self.flush_interval = 60  # seconds
+        self.storage = DataStorage(config_path)
         self.last_timestamp = None
         self.flushing = False
+        self.lock = Lock()
 
-    def create_tables(self):
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS trades (
-                trade_id TEXT PRIMARY KEY,
-                timestamp TEXT,
-                price REAL,
-                size REAL,
-                side TEXT
-            )
-        ''')
-        self.conn.commit()
+        # Setup logging
+        self.logger = logging.getLogger('DataFetcher')
+        self.logger.setLevel(logging.INFO)
+        handler = logging.handlers.RotatingFileHandler('logs/data_fetcher.log', maxBytes=1000000, backupCount=5)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
 
     async def subscribe_real_time_data(self):
         async with websockets.connect(self.ws_url) as websocket:
@@ -47,7 +42,7 @@ class DataFetcher:
                 }]
             }
             await websocket.send(json.dumps(subscribe_message))
-            print(f"Subscribed to trades channel for {self.symbol}")
+            self.logger.info(f"Subscribed to trades channel for {self.symbol}")
 
             async for message in websocket:
                 data = json.loads(message)
@@ -56,41 +51,37 @@ class DataFetcher:
                     self.process_trade_data(trades)
 
     def process_trade_data(self, trades):
-        for trade in trades:
-            trade_id = trade['tradeId']
-            timestamp = datetime.utcfromtimestamp(trade['ts'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
-            price = float(trade['px'])
-            size = float(trade['sz'])
-            side = trade['side']
-            self.buffer.append((trade_id, timestamp, price, size, side))
-        
-        # Flush buffer if batch size reached
-        if len(self.buffer) >= self.batch_size:
-            self.insert_trades()
+        with self.lock:
+            for trade in trades:
+                trade_id = trade['tradeId']
+                timestamp = datetime.utcfromtimestamp(trade['ts'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                price = float(trade['px'])
+                size = float(trade['sz'])
+                side = trade['side']
+                self.buffer.append((trade_id, timestamp, price, size, side))
+
+            if len(self.buffer) >= self.batch_size:
+                self.insert_trades()
 
     def insert_trades(self):
         if self.flushing:
             return
         self.flushing = True
         try:
-            self.cursor.executemany('''
-                INSERT OR IGNORE INTO trades (trade_id, timestamp, price, size, side)
-                VALUES (?, ?, ?, ?, ?)
-            ''', self.buffer)
-            self.conn.commit()
-            print(f"Inserted {len(self.buffer)} trades into the database.")
+            self.storage.insert_trades(self.buffer)
+            self.logger.info(f"Inserted {len(self.buffer)} trades into the database.")
             self.buffer = []
         except sqlite3.Error as e:
-            print(f"SQLite insertion error: {e}")
-            # 可以在此加入更多的错误处理逻辑
+            self.logger.error(f"SQLite insertion error: {e}")
         finally:
             self.flushing = False
 
     def flush_buffer_periodically(self):
-        while True:
+        while not self.stop_event.is_set():
             time.sleep(self.flush_interval)
-            if self.buffer:
-                self.insert_trades()
+            with self.lock:
+                if self.buffer:
+                    self.insert_trades()
 
     def start_with_flush(self):
         flush_thread = Thread(target=self.flush_buffer_periodically)
@@ -98,16 +89,20 @@ class DataFetcher:
         flush_thread.start()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(self.subscribe_real_time_data())
+        try:
+            loop.run_until_complete(self.subscribe_real_time_data())
+        except Exception as e:
+            self.logger.error(f"Asynchronous data fetching failed: {e}")
+        finally:
+            loop.close()
 
-    def fetch_historical_data(self, start_time, end_time):
-        # 实现历史数据获取的逻辑
-        # 这部分需要根据OKX的API文档进行具体实现
-        pass
+    def start(self):
+        self.stop_event = Event()
+        data_thread = Thread(target=self.start_with_flush)
+        data_thread.daemon = True
+        data_thread.start()
+        self.logger.info("DataFetcher started.")
 
 if __name__ == "__main__":
     fetcher = DataFetcher()
-    # 启动历史数据获取（需要实现）
-    # fetcher.fetch_historical_data(start_time, end_time)
-    # 启动实时数据接收与定期刷新
-    fetcher.start_with_flush()
+    fetcher.start()

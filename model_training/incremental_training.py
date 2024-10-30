@@ -1,9 +1,8 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import sqlite3
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
+import logging
 
 class TradeDataset(Dataset):
     def __init__(self, data):
@@ -25,6 +24,24 @@ class IncrementalTrainer:
         self.db_path = db_path
         self.model_path = model_path
 
+        # Setup logging
+        self.logger = logging.getLogger('IncrementalTrainer')
+        self.logger.setLevel(logging.INFO)
+        handler = logging.handlers.RotatingFileHandler('logs/incremental_trainer.log', maxBytes=1000000, backupCount=5)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
+    def get_last_timestamp(self):
+        # Implement retrieval of the last timestamp from the model_path or checkpoint
+        # For simplicity, assume it's stored in a metadata table
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(timestamp) FROM strategies')
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result[0] else '1970-01-01 00:00:00'
+
     def load_new_data(self, last_timestamp):
         conn = sqlite3.connect(self.db_path)
         query = f'''
@@ -36,18 +53,18 @@ class IncrementalTrainer:
         df = pd.read_sql_query(query, conn)
         df.dropna(inplace=True)
         conn.close()
+        self.logger.info(f"Loaded {len(df)} new records for incremental training.")
         return df
 
     def train_incrementally(self, batch_size=32, epochs=5):
-        # Retrieve the last timestamp from the model_path or a checkpoint file
-        # For simplicity, assume last_timestamp is stored externally
         last_timestamp = self.get_last_timestamp()
         df = self.load_new_data(last_timestamp)
         if df.empty:
-            print("No new data to train on.")
+            self.logger.info("No new data to train on.")
             return
         dataset = TradeDataset(df)
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        self.model.train()
         for epoch in range(epochs):
             for X, y in dataloader:
                 X = X.to(self.device)
@@ -57,10 +74,6 @@ class IncrementalTrainer:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+            self.logger.info(f"Incremental Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}")
         torch.save(self.model.state_dict(), self.model_path)
-        print("Incremental training completed and model updated.")
-
-    def get_last_timestamp(self):
-        # Implement logic to retrieve last timestamp from the trained model or checkpoints
-        # Placeholder implementation
-        return '2023-09-30 23:59:59'
+        self.logger.info("Incremental training completed and model updated.")

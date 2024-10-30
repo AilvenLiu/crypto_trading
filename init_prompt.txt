@@ -1,0 +1,14 @@
+This is a high frequency trading project for crypto features DCA based on OKX platform and its API, with (expecting to implement)
+1. abundant and perfect coins selection.
+2. functional, effecient, professional, and advanced financial models (combination)
+3. consecutive and incremental data fetching (abundant required)
+4. consecutive and incemental model finetuning based on the latest data.
+5. smart and self-adaptable leverage rate selection
+6. smart and self-adaptable direction selection (long or short) 
+7. smart and self-adaptable position manager
+8. smart and self-adaptable risk controller manager 
+9. advanced and user-friendly PnL and performance monitor.
+
+However, it now seems so crude the architecture design and detail implementation, the test modeule is even not runable. so, please give your complete modification for such a project.
+
+Here's the main content with same path level in the current project path: @config @backtesting  @data_processing @model_training @scripts @strategy_generation @tests @trading_execution @monitoring @requirements.txt

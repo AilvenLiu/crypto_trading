@@ -2,12 +2,14 @@ from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit
 import threading
 import yaml
+import logging
 from monitoring.backend.alert_manager import AlertManager
 from monitoring.backend.performance_monitor import PerformanceMonitor
+from trading_execution.executor import Executor
 
 # Initialize Flask app
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key'  # 请更改为实际的密钥
+app.config['SECRET_KEY'] = 'your_secret_key'  # Change to actual secret
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Load config
@@ -17,10 +19,7 @@ with open('config/config.yaml', 'r') as file:
 # Initialize components
 alert_manager = AlertManager(config_path='config/config.yaml')
 performance_monitor = PerformanceMonitor(config_path='config/config.yaml', socketio=socketio)
-
-# Import executor after app initialization to avoid circular imports
-from trading_execution.executor import get_executor
-executor = get_executor(config_path='config/config.yaml')
+executor = Executor(config_path='config/config.yaml')
 
 @app.route('/metrics', methods=['GET'])
 def get_metrics():
@@ -44,23 +43,19 @@ def control_commands():
     elif command == 'update_risk':
         new_leverage = command_data.get('new_leverage')
         if new_leverage:
-            executor.update_leverage(new_leverage)
-            socketio.emit('control_response', {'status': f'leverage updated to {new_leverage}x'})
-            return jsonify({'status': f'leverage updated to {new_leverage}x'})
+            executor.risk_manager.update_leverage(new_leverage)
+            socketio.emit('control_response', {'status': f'Leverage updated to {new_leverage}x'})
+            return jsonify({'status': f'Leverage updated to {new_leverage}x'})
         else:
             return jsonify({'error': 'No leverage value provided'}), 400
     else:
         return jsonify({'error': 'Unknown command'}), 400
 
-@socketio.on('connect')
-def handle_connect():
-    app.logger.info(f"Client connected: {request.sid}")
-    emit('connection_response', {'status': 'connected'})
+if __name__ == "__main__":
+    # Start performance monitoring in a separate thread
+    monitor_thread = threading.Thread(target=performance_monitor.monitor_performance)
+    monitor_thread.daemon = True
+    monitor_thread.start()
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    app.logger.info(f"Client disconnected: {request.sid}")
-
-if __name__ == '__main__':
-    # Start Flask-SocketIO server
+    # Start Flask app with SocketIO
     socketio.run(app, host='0.0.0.0', port=5000)

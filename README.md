@@ -1,5 +1,75 @@
 # 基于 OKX 永续合约的高频量化交易系统
 
+
+## Project Structure
+
+```
+crypto_trading
+│
+├── config/
+│   ├── config.yaml
+│   ├── config_simulation.yaml
+│   ├── config_real.yaml
+│   └── test_config.yaml
+│
+├── backtesting/
+│   ├── __init__.py
+│   └── backtester.py
+│
+├── data_processing/
+│   ├── __init__.py
+│   ├── data_fetcher.py
+│   ├── data_storage.py
+│   └── indicators.py
+│
+├── model_training/
+│   ├── __init__.py
+│   ├── optimizer.py
+│   ├── trainer.py
+│   └── incremental_training.py
+│
+├── scripts/
+│   └── deploy.sh
+│
+├── strategy_generation/
+│   ├── __init__.py
+│   ├── multi_strategy_manager.py
+│   └── signal_generator.py
+│
+├── trading_execution/
+│   ├── __init__.py
+│   ├── executor.py
+│   └── risk_manager.py
+│
+├── monitoring/
+│   ├── backend/
+│   │   ├── __init__.py
+│   │   ├── alert_manager.py
+│   │   ├── monitor.py
+│   │   └── performance_monitor.py
+│   └── frontend/
+│       ├── index.html
+│       ├── styles.css
+│       └── app.js
+│
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── test_backtester.py
+│   ├── test_data_fetcher.py
+│   ├── test_executor.py
+│   ├── test_monitor.py
+│   ├── test_risk_controller.py
+│   ├── test_risk_manager.py
+│   ├── test_signal_generator.py
+│   ├── test_trader.py
+│   └── test_trainer.py
+│
+├── requirements.txt
+│
+└── README.md
+```
+
 ## 项目概述
 
 本项目旨在实现一个高频量化交易系统，支持 OKX 永续合约交易，具备实时数据获取、策略回测、模型增量训练、信号生成、自动交易执行和可视化监控等功能。系统采用 C++ 和 Python 构建，前端监控使用 JavaScript，实现了数据处理、风险管理和性能监控的无缝集成。

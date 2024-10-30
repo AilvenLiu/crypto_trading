@@ -3,6 +3,7 @@ import yaml
 import sqlite3
 import pandas as pd
 from model_training.trainer import TradeModel
+import logging
 
 class SignalGenerator:
     def __init__(self, config_path='config/config.yaml'):
@@ -15,20 +16,31 @@ class SignalGenerator:
         self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
         self.model.eval()
 
+        # Setup logging
+        self.logger = logging.getLogger('SignalGenerator')
+        self.logger.setLevel(logging.INFO)
+        handler = logging.handlers.RotatingFileHandler('logs/signal_generator.log', maxBytes=1000000, backupCount=5)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
     def generate_signal(self):
         conn = sqlite3.connect(self.db_path)
         query = '''
-            SELECT ma, macd, rsi FROM indicators
+            SELECT ma_10, macd, rsi FROM indicators
             ORDER BY timestamp DESC LIMIT 1
         '''
         df = pd.read_sql_query(query, conn)
+        conn.close()
         if df.empty:
+            self.logger.warning("No indicator data available to generate signal.")
             return None
-        data = torch.tensor(df[['ma', 'macd', 'rsi']].values, dtype=torch.float32).to(self.device)
+        data = torch.tensor(df[['ma_10', 'macd', 'rsi']].values, dtype=torch.float32).to(self.device)
         with torch.no_grad():
             output = self.model(data)
             _, predicted = torch.max(output, 1)
             signal = predicted.item()
+        self.logger.info(f"Generated signal: {signal}")
         return signal  # 1 for Buy, 0 for Sell
 
 if __name__ == "__main__":

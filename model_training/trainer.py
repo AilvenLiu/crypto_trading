@@ -3,13 +3,15 @@ import torch.nn as nn
 import torch.optim as optim
 import yaml
 import os
-from torch.utils.data import Dataset, DataLoader
+import sqlite3
 import pandas as pd
-from incremental_training import IncrementalTrainer
+import logging
+from torch.utils.data import Dataset, DataLoader
+from model_training.incremental_training import IncrementalTrainer
 
 class TradeDataset(Dataset):
     def __init__(self, data):
-        self.X = data[['ma', 'macd', 'rsi']].values
+        self.X = data[['ma_10', 'macd', 'rsi']].values
         self.y = data['signal'].values
 
     def __len__(self):
@@ -51,6 +53,14 @@ class Trainer:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
 
+        # Setup logging
+        self.logger = logging.getLogger('Trainer')
+        self.logger.setLevel(logging.INFO)
+        handler = logging.handlers.RotatingFileHandler('logs/trainer.log', maxBytes=1000000, backupCount=5)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
     def load_data(self, incremental=False, last_timestamp=None):
         conn = sqlite3.connect(self.db_path)
         if incremental and last_timestamp:
@@ -69,6 +79,8 @@ class Trainer:
             '''
         df = pd.read_sql_query(query, conn)
         df.dropna(inplace=True)
+        conn.close()
+        self.logger.info(f"Loaded {len(df)} records for training.")
         return df
 
     def train(self):
@@ -84,10 +96,9 @@ class Trainer:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-            print(f"Epoch [{epoch+1}/{self.epochs}], Loss: {loss.item():.4f}")
-        # Save the model
+            self.logger.info(f"Epoch [{epoch+1}/{self.epochs}], Loss: {loss.item():.4f}")
         torch.save(self.model.state_dict(), self.model_path)
-        print("Model training completed and saved.")
+        self.logger.info("Model training completed and saved.")
 
     def incremental_train(self):
         incremental_trainer = IncrementalTrainer(

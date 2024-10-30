@@ -1,25 +1,14 @@
 #!/bin/bash
 
-# 设置环境变量
-ENVIRONMENT=$1
+# Exit immediately if a command exits with a non-zero status
+set -e
 
-if [ "$ENVIRONMENT" == "real" ]; then
-    CONFIG_FILE="config/config_real.yaml"
-elif [ "$ENVIRONMENT" == "simulation" ]; then
-    CONFIG_FILE="config/config_simulation.yaml"
-else
-    echo "Usage: ./deploy.sh [real|simulation]"
-    exit 1
-fi
+CONFIG_FILE='config/config.yaml'
 
-echo "Deploying system in $ENVIRONMENT environment using $CONFIG_FILE..."
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 初始化数据库
+# Initialize database
+echo "Initializing database..."
 python -c "
-import sqlite3, yaml
+import sqlite3, yaml, json
 with open('$CONFIG_FILE', 'r') as f:
     config = yaml.safe_load(f)
 conn = sqlite3.connect(config['data_processing']['db_path'])
@@ -64,45 +53,36 @@ cursor.execute('''
 conn.commit()
 conn.close()
 "
+echo "Database initialized."
 
-# 配置日志路径 (ensure logs directory exists)
+# Ensure logs directory exists
 mkdir -p logs
 
-# 设置资源限制 (example for Linux)
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Limit CPU usage to 80%
-    cpulimit --limit=80 --background -- python data_processing/data_fetcher.py
-    # Similar resource limits can be applied to other modules
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    # MacOS resource limiting can be implemented using different tools or left as is
-    python data_processing/data_fetcher.py &
-else
-    echo "Unsupported OS. Exiting."
-    exit 1
-fi
-
+# Start all services with resource limits if applicable
 echo "Starting Data Fetcher..."
-python data_processing/data_fetcher.py &
+(eventlet.spawn python data_processing/data_fetcher.py &) # Using eventlet for concurrency
 
 echo "Starting Indicators Calculator..."
-python data_processing/indicators.py &
+(eventlet.spawn python data_processing/indicators.py &) 
 
 echo "Starting Model Trainer..."
-python model_training/trainer.py &
+(eventlet.spawn python model_training/trainer.py &) 
 
 echo "Starting Signal Generator..."
-python strategy_generation/signal_generator.py &
+(eventlet.spawn python strategy_generation/signal_generator.py &) 
 
 echo "Starting Multi Strategy Manager..."
-python strategy_generation/multi_strategy_manager.py &
+(eventlet.spawn python strategy_generation/multi_strategy_manager.py &) 
 
 echo "Starting Trading Executor..."
-python trading_execution/executor.py &
+(eventlet.spawn python trading_execution/executor.py &) 
 
 echo "Starting Monitoring Backend..."
-python monitoring/backend/monitor.py &
+(eventlet.spawn python monitoring/backend/monitor.py &) 
 
 echo "Starting Monitoring Frontend..."
 cd monitoring/frontend
 python -m http.server 8000 &
+cd ../../
 
+echo "Deployment completed successfully."

@@ -43,7 +43,6 @@ def client(mock_config, mock_executor, mock_performance_monitor):
     app.config['TESTING'] = True
     with app.test_client() as client:
         yield client
-
 @pytest.fixture
 def mock_performance_monitor():
     with patch('monitoring.backend.monitor.PerformanceMonitor') as mock:
@@ -91,3 +90,4 @@ def test_control_missing_leverage(client):
                          json={'command': 'update_risk'})
     assert response.status_code == 400
     assert response.get_json()['error'] == 'No leverage value provided'
+

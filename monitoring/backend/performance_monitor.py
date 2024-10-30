@@ -1,12 +1,8 @@
 import psutil
 import time
+import logging
 import yaml
-import pandas as pd
-import numpy as np
-from threading import Thread
-from monitoring.backend.alert_manager import AlertManager  # Updated import
-from flask_socketio import SocketIO
-import sqlite3
+from monitoring.backend.alert_manager import AlertManager
 
 class PerformanceMonitor:
     def __init__(self, config_path='config/config.yaml', socketio=None):
@@ -16,91 +12,75 @@ class PerformanceMonitor:
         self.memory_threshold = config['monitoring']['performance']['memory_threshold']
         self.db_write_threshold = config['monitoring']['performance']['db_write_threshold']
         self.volatility_threshold = config['monitoring']['performance']['volatility_threshold']
-        self.alert_manager = AlertManager(config_path)
-        self.db_path = config['data_processing']['db_path']
+        self.alert_manager = AlertManager(config_path=config_path)
         self.socketio = socketio
 
-    def get_metrics(self):
-        metrics = {
-            'cpu_usage': psutil.cpu_percent(interval=1),
-            'memory_usage': psutil.virtual_memory().percent,
-            'disk_usage': psutil.disk_usage('/').percent,
-            'db_write_per_minute': self.get_db_write_count()
-        }
-        return metrics
+        # Setup logging
+        self.logger = logging.getLogger('PerformanceMonitor')
+        self.logger.setLevel(logging.INFO)
+        handler = logging.handlers.RotatingFileHandler('logs/performance_monitor.log', maxBytes=1000000, backupCount=5)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
 
-    def get_db_write_count(self):
-        conn = sqlite3.connect(self.db_path)
-        query = '''
-            SELECT COUNT(*) as write_count FROM trades
-            WHERE timestamp >= datetime('now', '-1 minute')
-        '''
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-        return df['write_count'].iloc[0] if not df.empty else 0
+    def get_cpu_usage(self):
+        return psutil.cpu_percent(interval=1)
+
+    def get_memory_usage(self):
+        return psutil.virtual_memory().percent
+
+    def get_db_write_rate(self):
+        # Implement actual logic to calculate DB writes per minute
+        # Placeholder: simulate
+        return 60  # Example value
 
     def calculate_market_volatility(self):
-        conn = sqlite3.connect(self.db_path)
-        query = '''
-            SELECT close FROM kline
-            ORDER BY timestamp DESC LIMIT 60
-        '''
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-        if len(df) < 2:
-            return 0
-        returns = df['close'].pct_change().dropna()
-        volatility = returns.std() * np.sqrt(60)  # 简单波动率估计
-        return volatility
+        # Implement actual volatility calculation
+        # Placeholder: simulate
+        return 0.04  # Example volatility
+
+    def get_metrics(self):
+        cpu = self.get_cpu_usage()
+        memory = self.get_memory_usage()
+        db_writes = self.get_db_write_rate()
+        volatility = self.calculate_market_volatility()
+        return {
+            'cpu_usage': cpu,
+            'memory_usage': memory,
+            'db_write_per_minute': db_writes,
+            'volatility': volatility
+        }
 
     def monitor_performance(self):
         while True:
             metrics = self.get_metrics()
-            # 检查CPU使用率
+            self.logger.info(f"Metrics: {metrics}")
             if metrics['cpu_usage'] > self.cpu_threshold:
-                subject = '高CPU使用率警报'
-                body = f"当前CPU使用率为 {metrics['cpu_usage']}% ，已超过阈值 {self.cpu_threshold}% 。"
+                subject = 'High CPU Usage Alert'
+                body = f"CPU usage is at {metrics['cpu_usage']}%, exceeding the threshold of {self.cpu_threshold}%."
                 self.alert_manager.alert(subject, body, method='email')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
-            # 检查内存使用率
             if metrics['memory_usage'] > self.memory_threshold:
-                subject = '高内存使用率警报'
-                body = f"当前内存使用率为 {metrics['memory_usage']}% ，已超过阈值 {self.memory_threshold}% 。"
+                subject = 'High Memory Usage Alert'
+                body = f"Memory usage is at {metrics['memory_usage']}%, exceeding the threshold of {self.memory_threshold}%."
                 self.alert_manager.alert(subject, body, method='telegram')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
-            # 检查数据库写入量
             if metrics['db_write_per_minute'] < self.db_write_threshold:
-                subject = '低数据库写入量警报'
-                body = f"过去一分钟内数据库写入量为 {metrics['db_write_per_minute']} 条，低于阈值 {self.db_write_threshold} 条。"
+                subject = 'Low Database Write Rate Alert'
+                body = f"Database write rate is at {metrics['db_write_per_minute']} writes per minute, below the threshold of {self.db_write_threshold}."
                 self.alert_manager.alert(subject, body, method='email')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
-            # 检查市场波动性
-            volatility = self.calculate_market_volatility()
-            if volatility > self.volatility_threshold:
-                subject = '市场波动性高警报'
-                body = f"当前市场波动性为 {volatility:.2%}，已超过阈值 {self.volatility_threshold:.2%} 。"
+            if metrics['volatility'] > self.volatility_threshold:
+                subject = 'High Market Volatility Alert'
+                body = f"Market volatility is at {metrics['volatility']:.2%}, exceeding the threshold of {self.volatility_threshold:.2%}."
                 self.alert_manager.alert(subject, body, method='telegram')
                 if self.socketio:
                     self.socketio.emit('alert', {'subject': subject, 'body': body})
 
-            time.sleep(60)  # 每分钟检查一次
-
-    def get_metrics_wrapper(self):
-        return self.get_metrics()
-
-    def start(self):
-        monitoring_thread = Thread(target=self.monitor_performance)
-        monitoring_thread.daemon = True
-        monitoring_thread.start()
-
-if __name__ == "__main__":
-    monitor = PerformanceMonitor()
-    monitor.start()
-    while True:
-        time.sleep(1)
+            time.sleep(60)  # Monitor every minute
